@@ -14,8 +14,18 @@ LangGraph에서 사용하는 '노드' 모음.
 - 서버는 결과를 있는 그대로 전달만 한다.
 """
 
-from typing import List, Dict, Any, Literal
+from typing import List, Dict, Any, Literal, Tuple
 import json, re, random, os
+from langchain_core.documents import Document
+from langchain_core.prompts import ChatPromptTemplate
+from app.services.retriever import (
+    get_cached_retrievers,
+    get_all_cached_chunks,
+    get_filtered_bm25_retriever,
+    weighted_reciprocal_rank_fusion,
+    format_docs,
+)
+from app.core.config import rag_logger
 
 # LLM 클라이언트 (사용 가능한 것만 import)
 try:
@@ -510,3 +520,79 @@ def node_answer(state: Dict[str, Any]) -> Dict[str, Any]:
         state["answer"] = fallback
         state["llm_answer"] = None
         return state
+
+#--------------------------------------------
+# 학사공통
+# -------------------------------------------
+
+RETRIEVER_TOP_K = 7
+CONFIDENCE_THRESHOLD = 0.02
+
+def retrieve_node(state: Dict[str, Any]):
+    question = state["question"]
+    departments = state.get("departments")
+    rag_logger.info(f"--- Retrieving for: '{question}' in {departments} ---")
+
+    chroma_r = get_cached_retrievers()
+    search_kwargs = {"k": 10}
+    if departments:
+        if len(departments) == 1:
+            filter_query = {"source": departments[0]}
+        else:
+            filter_query = {"$or": [{"source": dept} for dept in departments]}
+        search_kwargs["filter"] = filter_query
+
+    chroma_results = chroma_r.invoke(question, **search_kwargs)
+    all_chunks = get_all_cached_chunks()
+    bm25_r = get_filtered_bm25_retriever(all_chunks, departments)
+    bm25_results = bm25_r.invoke(question)
+
+    fused_results = weighted_reciprocal_rank_fusion(
+        [chroma_results, bm25_results], weights=[0.5, 0.5], c=0
+    )
+
+    if not fused_results:
+        return {"documents": [], "retrieval_success": False, "top_score": 0.0}
+
+    return {"documents": fused_results, "retrieval_success": True, "top_score": fused_results[0][1]}
+
+def generate_node(state: Dict[str, Any]):
+    rag_logger.info("--- Generating Answer ---")
+    context = format_docs([doc for doc, _ in state["documents"][:RETRIEVER_TOP_K]])
+    system_prompt = (
+        "You're the Slack bot \"래기\". You must speak in Korean."
+        "Answer with the following documents as the primary basis, and if you don't know, answer that you don't know."
+        "Quote briefly a clause/page/section that may be the source."
+    )
+    user_prompt = ChatPromptTemplate.from_messages([
+        ("system", system_prompt),
+        ("user", "Here is query contexts:\n{context}\n\nUser query:\n{question}")
+    ])
+    llm = _make_llm(
+        model_name=config.LLM_MODEL,
+        temperature=config.TEMPERATURE,
+        max_tokens=config.MAX_TOKENS,
+    )
+    chain = user_prompt | llm
+    result = chain.invoke({"context": context, "question": state["question"]})
+    return {"answer": result.content}
+
+def fallback_node(state: Dict[str, Any]):
+    rag_logger.info("--- Fallback Triggered ---")
+    reason = state.get("fallback_reason", "알 수 없는 이유")
+    return {"answer": reason}
+
+def should_generate(state: Dict[str, Any]) -> str:
+    if not state.get("retrieval_success"):
+        rag_logger.info("--- Decision: No documents found, routing to fallback. ---")
+        state["fallback_reason"] = "관련 문서를 찾을 수 없습니다."
+        return "fallback"
+    top_score = state.get("top_score", 0.0)
+    rag_logger.info(f"--- Top Score: {top_score:.4f} ---")
+    if top_score < CONFIDENCE_THRESHOLD:
+        rag_logger.info(f"--- Decision: Score below threshold, routing to fallback. ---")
+        state["fallback_reason"] = f"관련성이 높은 문서를 찾지 못해 답변하기 어렵습니다. (신뢰도: {top_score:.3f})"
+        return "fallback"
+    else:
+        rag_logger.info("--- Decision: Score is sufficient, routing to generate. ---")
+        return "generate"

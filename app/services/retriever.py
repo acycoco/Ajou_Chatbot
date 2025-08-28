@@ -5,6 +5,7 @@
 - 질문에 학년/학기 감지 시, 메타 필터로 바로 해당 term 섹션 전체 확장
 """
 from typing import List, Dict, Any, Optional, Tuple
+from langchain_core.documents import Document
 import re
 import unicodedata
 import math
@@ -14,7 +15,16 @@ from rank_bm25 import BM25Okapi
 
 from .storage import get_client, get_collection, get_all, get_where_all
 from .textutil import tokenize_ko, normalize_numbers, detect_year_semester_in_query
-
+from sentence_transformers import CrossEncoder
+from .indexer import process_documents
+from app.core import config  # 전역 스위치 사용
+import os
+from langchain_community.retrievers import BM25Retriever
+from langchain_chroma import Chroma
+from app.core.config import rag_logger, PDF_FILES, PERSIST_DIR_INFO
+from konlpy.tag import Okt
+from langchain_huggingface import HuggingFaceEmbeddings
+import torch
 EPS = 1e-9
 
 # ---------------- 스코어 정규화 ----------------

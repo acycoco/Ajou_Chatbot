@@ -1,7 +1,9 @@
 from typing import Dict, Any, Optional, List
 from langgraph.graph import StateGraph, END
-from .state import GraphState
-from .nodes import node_parse_intent, node_need_more, node_retrieve, node_build_context, node_answer
+from .state import GraphState, GraphStateInfo
+from .nodes import node_parse_intent, node_need_more, node_retrieve, node_build_context, node_answer, retrieve_node, \
+    generate_node, fallback_node, should_generate
+from langchain_core.runnables import RunnableConfig
 from .nodes_classify import node_classify
 from app.core import config
 
@@ -102,4 +104,64 @@ def run_rag_graph(
         "error": out.get("error"),
         "clarification_prompt": out.get("clarification_prompt"),
         "llm_answer": out.get("llm_answer"),
+    }
+
+#--------------------------------------------
+# 학사공통
+# -------------------------------------------
+
+def make_graph():
+    graph = StateGraph(GraphStateInfo)
+
+    graph.add_node("retrieve", retrieve_node)
+    graph.add_node("generate", generate_node)
+    graph.add_node("fallback", fallback_node)
+
+    graph.set_entry_point("retrieve")
+
+    graph.add_conditional_edges(
+        "retrieve",
+        should_generate,
+        {
+            "generate": "generate",
+            "fallback": "fallback",
+        },
+    )
+
+    graph.add_edge("generate", END)
+    graph.add_edge("fallback", END)
+
+    return graph.compile()
+
+_pipeline_cache = {}
+
+def get_cached_pipeline():
+    """그래프 파이프라인을 캐싱하여 반환"""
+    if "graph" in _pipeline_cache:
+        return _pipeline_cache["graph"]
+    app = make_graph()
+    _pipeline_cache["graph"] = app
+    return app
+
+
+def route_query_sync(question: str, departments: List[str] = None, session_id: str = "default"):
+    """
+    그래프를 동기적으로 실행하는 함수.
+    departments 리스트를 받아 메타데이터 필터링을 수행합니다.
+    """
+    if departments is None:
+        departments = []
+
+    # get_cached_pipeline()은 이제 모든 요청에 대해 동일한 그래프를 반환해야 합니다.
+    app = get_cached_pipeline()
+    config = RunnableConfig(configurable={"session_id": session_id})
+
+    # GraphState에 맞게 'question'과 'departments'를 전달합니다.
+    inputs = {"question": question, "departments": departments}
+
+    final_state = app.invoke(inputs, config=config)
+
+    return {
+        "answer": final_state.get("answer", "오류가 발생했습니다."),
+        "documents": final_state.get("documents", [])  # 디버깅을 위해 검색된 문서도 반환
     }

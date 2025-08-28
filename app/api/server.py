@@ -13,7 +13,7 @@
 - 입력 검증(필수 파라미터)과 간단한 guard는 서버에서 처리.
 """
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import ORJSONResponse
 from pydantic import BaseModel, Field
@@ -24,6 +24,10 @@ from app.core import config
 from app.models.schemas import QueryRequest           # /yoram 입력 스키마
 from app.graphs.pipeline import run_rag_graph         # LangGraph 진입점
 from app.utils.log import jlog                        # 선택적 구조화 로그
+from app.core.config import CorpusType
+from app.models.schemas import InfoResponse, InfoRequest
+from app.graphs.pipeline import run_rag_graph, route_query_sync
+from app.utils.log import jlog, timed
 
 # -----------------------------------------------------------------------------
 # 앱/미들웨어
@@ -400,3 +404,37 @@ async def post_menu(req: MenuRequest, request: Request):
         "error": None,
         "clarification": None,
     }
+
+@app.post("/info", response_model=InfoResponse)
+@timed("http_post_info")
+def info_query(req: InfoRequest, request: Request):
+    request_id = str(uuid.uuid4())
+    try:
+        jlog(event="request", route="/info", request_id=request_id,
+             question=req.question, selected_list=req.selected_list, opts=req.dict())
+
+        # selected_list 유효성 검사
+        valid_departments = [ctype.value for ctype in CorpusType]
+        for dept in req.selected_list:
+            if dept not in valid_departments:
+                raise HTTPException(status_code=400, detail=f"Invalid department: {dept}. Must be one of {valid_departments}")
+
+        result = route_query_sync(
+            question=req.question,
+            departments=req.selected_list
+        )
+
+        jlog(event="result", route="/info", request_id=request_id,
+             question=req.question, departments=req.selected_list, success=True)
+
+        return InfoResponse(
+            answer=result["answer"],
+            question=req.question
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        jlog(event="exception", route="/info", request_id=request_id,
+             question=req.question, error=str(e))
+        raise HTTPException(status_code=500, detail=f"Processing error: {str(e)}")
