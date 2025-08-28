@@ -21,7 +21,7 @@ from app.core import config  # 전역 스위치 사용
 import os
 from langchain_community.retrievers import BM25Retriever
 from langchain_chroma import Chroma
-from app.core.config import rag_logger, PDF_FILES, PERSIST_DIR_INFO
+from app.core.config import rag_logger, PDF_FILES, PERSIST_DIR_INFO, CorpusType
 from konlpy.tag import Okt
 from langchain_huggingface import HuggingFaceEmbeddings
 import torch
@@ -398,3 +398,142 @@ def retrieve(
         paths = [h.get("path") for h in hits[:min(5, len(hits))]]
         print(f"[Retriever] expanded sections: {paths}")
     return hits
+
+# =============================================================================
+# 학사공통
+# =============================================================================
+
+TOKENIZER = Okt()
+model_name = "BAAI/bge-m3"
+
+# --- GPU 자동 감지 로직 ---
+# torch.cuda.is_available()가 GPU의 존재 여부를 확인합니다.
+device = "cuda" if torch.cuda.is_available() else "cpu"
+rag_logger.info(f"✅ Using device: {device}")
+# ---
+
+model_kwargs = {'device': device}
+encode_kwargs = {'normalize_embeddings': True}
+
+embeddings = HuggingFaceEmbeddings(
+    model_name=model_name,
+    model_kwargs=model_kwargs,
+    encode_kwargs=encode_kwargs
+)
+
+# 전역 캐시 딕셔너리 (하나만 존재해야 합니다)
+_retriever_cache = {}
+
+def get_filtered_bm25_retriever(all_chunks: List[Document], departments: List[str] = None) -> BM25Retriever:
+    """departments에 해당하는 문서들로만 BM25 retriever를 동적으로 생성합니다."""
+    if not departments:
+        filtered_chunks = all_chunks
+    else:
+        filtered_chunks = [
+            doc for doc in all_chunks
+            if doc.metadata.get("source") in departments
+        ]
+
+    if not filtered_chunks:
+        # 필터링 결과 문서가 없을 경우를 대비해 빈 문서를 담은 retriever 생성
+        rag_logger.warning(f"BM25: No documents found for departments: {departments}")
+        return BM25Retriever.from_documents(
+            [Document(page_content="내용 없음")],
+            preprocess_func=lambda x: TOKENIZER.morphs(x)
+        )
+
+    bm25_r = BM25Retriever.from_documents(
+        filtered_chunks,
+        preprocess_func=lambda x: TOKENIZER.morphs(x)
+    )
+    bm25_r.k = 10
+    rag_logger.info(f"✅ Dynamically created BM25 retriever with {len(filtered_chunks)} chunks for {departments or 'all documents'}")
+    return bm25_r
+
+def get_all_cached_chunks() -> List[Document]:
+    """캐시된 전체 문서 청크들을 반환합니다."""
+    # 캐시에서 'chunks' 키로 저장된 청크 리스트를 직접 가져옴
+    if "chunks" in _retriever_cache:
+        return _retriever_cache["chunks"]
+
+    # 캐시가 없다면 retriever 생성을 통해 캐시를 채움
+    get_cached_retrievers()
+    return _retriever_cache.get("chunks", [])
+
+# === wRRF ===
+def weighted_reciprocal_rank_fusion(
+    all_retriever_results: List[List[Document]],
+    weights: List[float],
+    c: int = 60
+) -> List[Tuple[Document, float]]:
+    content_to_document = {}
+    for single_result_list in all_retriever_results:
+        for doc in single_result_list:
+            if doc.page_content not in content_to_document:
+                content_to_document[doc.page_content] = doc
+
+    fused_scores = {}
+    for single_result_list, weight in zip(all_retriever_results, weights):
+        for rank, doc in enumerate(single_result_list, start=1):
+            doc_key = doc.page_content
+            if doc_key not in fused_scores:
+                fused_scores[doc_key] = 0.0
+            score = weight * (1 / (rank + c))
+            fused_scores[doc_key] += score
+
+    sorted_results = sorted(fused_scores.items(), key=lambda x: -x[1])
+    final_sorted_docs = [(content_to_document[content], score) for content, score in sorted_results]
+    return final_sorted_docs
+
+def format_docs(docs, max_chars: int = 1800) -> str:
+    out = []
+    for i, d in enumerate(docs, 1):
+        src = d.metadata.get("title", d.metadata.get("source", "doc"))
+        page = d.metadata.get("page", "?")
+        body = d.page_content[:max_chars].replace("\u200b", "").strip()
+        out.append(f"[{i}] {src}, page={page}\n{body}")
+    return "\n\n---\n\n".join(out)
+
+def load_chroma(persistent_dir: str, chunks: List) -> Chroma:
+    if os.path.exists(persistent_dir) and len(os.listdir(persistent_dir)) > 0:
+        rag_logger.info(f"✅ Loading existing ChromaDB from: {persistent_dir}")
+        return Chroma(persist_directory=persistent_dir, embedding_function=embeddings)
+
+    rag_logger.info(f"✅ Creating new ChromaDB at: {persistent_dir}")
+    vs = Chroma.from_documents(chunks, embedding=embeddings, persist_directory=persistent_dir)
+    return vs
+
+def get_cached_retrievers():
+    """
+    하나의 통합 DB와 전체 청크 리스트를 로드하고 캐싱하여 재사용합니다.
+    이 함수는 애플리케이션 시작 시 한 번만 무거운 작업을 수행합니다.
+    """
+    # 1. 캐시에 이미 만들어진 검색기가 있으면 즉시 반환
+    if "unified" in _retriever_cache:
+        return _retriever_cache["unified"]
+
+    #     # 2. 캐시에 없다면, 모든 문서를 읽고 청킹
+    rag_logger.info("⏳ No retriever cache found. Building a new one for /info pipeline...")
+
+    # --- BUG FIX: process_documents는 파일 경로의 '리스트'를 인자로 받습니다. ---
+    # PDF_FILES 딕셔너리에서 값(파일 경로)만 추출하여 리스트로 전달합니다.
+    all_pdf_paths = list(PDF_FILES.values())
+    all_chunks = process_documents(all_pdf_paths)
+
+    if not all_chunks:
+        raise ValueError("No chunks were generated from the documents.")
+
+    # 3. 청킹된 데이터를 기반으로 ChromaDB 로드/생성
+    vector_vs = load_chroma(PERSIST_DIR_INFO, all_chunks)
+
+    # 4. ChromaDB로부터 벡터 검색기(retriever) 생성
+    chroma_r = vector_vs.as_retriever(search_kwargs={"k": 10})
+    rag_logger.info(f"✅ Unified Chroma index built/loaded with {len(all_chunks)} chunks!")
+
+    # 5. 나중에 다른 함수(get_all_cached_chunks 등)에서 사용할 수 있도록
+    #    전체 청크 리스트와 생성된 검색기를 캐시에 저장
+    _retriever_cache["chunks"] = all_chunks
+    _retriever_cache["unified"] = chroma_r
+
+    # 6. 생성된 검색기 반환
+    return chroma_r
