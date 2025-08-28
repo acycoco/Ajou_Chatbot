@@ -24,9 +24,9 @@ class CorpusType(Enum):
 
 # --- 경로 설정: 프로젝트 루트를 기준으로 모든 경로를 설정합니다. ---
 # 이 파일(app/core/config.py)의 위치를 기준으로 프로젝트 루트를 계산합니다. (app/core -> app -> project_root)
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-MD_DIRECTORY = os.path.join(PROJECT_ROOT, "data", "markdown", "academics_common")
+MD_DIRECTORY = os.path.join(PROJECT_ROOT, "app", "data", "markdown", "academics_common")
 MARKDOWN_CACHE_DIR = MD_DIRECTORY # 동일한 경로를 사용
 os.makedirs(MARKDOWN_CACHE_DIR, exist_ok=True)
 PDF_FILES = {
