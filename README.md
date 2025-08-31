@@ -112,7 +112,7 @@ NOTICE_CRON_HOUR=0
 NOTICE_CRON_MINUTE=0
 
 # Chroma 저장 위치
-CHROMA_DIR=./app/data/collections
+CHROMA_DIR=./storage
 
 # 컬렉션 이름 커스터마이즈
 CHROMA_COLLECTION_MAJOR=major_dm
