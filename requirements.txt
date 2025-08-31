@@ -6,7 +6,7 @@
 #
 annotated-types==0.7.0
     # via pydantic
-anthropic==0.62.0
+anthropic==0.64.0
     # via
     #   -r requirements.in
     #   langchain-anthropic
@@ -37,7 +37,7 @@ certifi==2025.8.3
     #   requests
 charset-normalizer==3.4.3
     # via requests
-chromadb==1.0.16
+chromadb==1.0.20
     # via -r requirements.in
 click==8.2.1
     # via
@@ -130,9 +130,9 @@ kiwipiepy-model==0.21.0
     # via kiwipiepy
 kubernetes==33.1.0
     # via chromadb
-langchain-anthropic==0.3.18
+langchain-anthropic==0.3.19
     # via -r requirements.in
-langchain-core==0.3.74
+langchain-core==0.3.75
     # via
     #   -r requirements.in
     #   langchain-anthropic
@@ -140,7 +140,7 @@ langchain-core==0.3.74
     #   langgraph
     #   langgraph-checkpoint
     #   langgraph-prebuilt
-langchain-openai==0.3.29
+langchain-openai==0.3.32
     # via -r requirements.in
 langgraph==0.6.6
     # via -r requirements.in
@@ -182,7 +182,7 @@ oauthlib==3.3.1
     #   requests-oauthlib
 onnxruntime==1.22.1
     # via chromadb
-openai==1.99.6
+openai==1.102.0
     # via
     #   -r requirements.in
     #   langchain-openai

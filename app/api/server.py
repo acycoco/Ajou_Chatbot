@@ -4,8 +4,8 @@
 구성 요약
 - CORS/타이밍 로깅 등 공통 미들웨어
 - 헬스체크(/health), 경량 메트릭(/metrics-lite)
-- 핵심 RAG 엔드포인트: /yoram (요람/학과별)
-- 보조 엔드포인트: /info(학사공통), /announcement(공지), /menu(임시)
+- 핵심 RAG 엔드포인트: /yoram (요람/학과별), /info(학사공통), /announcement(공지)
+- 보조 엔드포인트: /menu(임시)
 
 설계 원칙
 - '생성(LLM) 결과의 후처리(인사말/출처 병합)'는 그래프 레이어에서 수행.
@@ -119,24 +119,6 @@ def _run_graph(req: QueryRequest) -> dict:
         rerank_candidates=req.rerank_candidates or 30,
     )
 
-
-# -----------------------------------------------------------------------------
-# 보조 스키마 (엔드포인트별 입력 전용)
-# -----------------------------------------------------------------------------
-# class InfoRequest(BaseModel):
-#     """학사 공통(학칙/학사력 등) 조회용 요청 바디."""
-#     question: str
-#     topics: List[str] = Field(default_factory=list)
-#     topk: int = 8
-#     debug: bool = False
-#     use_llm: bool = True
-#     micro_mode: str = "exclude"
-#     assemble_budget_chars: Optional[int] = None
-#     max_ctx_chunks: Optional[int] = None
-#     rerank: Optional[bool] = None
-#     rerank_model: Optional[str] = None
-#     rerank_candidates: Optional[int] = None
-
 class AnnouncementRequest(BaseModel):
     """학과/단과대 공지 조회용 요청 바디."""
     question: str
@@ -219,89 +201,8 @@ async def post_yoram(req: QueryRequest, request: Request):
         }
 
 
-# # -----------------------------------------------------------------------------
-# # 보조 엔드포인트: /info (학사공통)
-# # -----------------------------------------------------------------------------
-# @app.post("/info")
-# async def post_info(req: InfoRequest, request: Request):
-#     """
-#     학사 공통 범주(topics)에 대한 질문.
-#     - 현재는 동일 그래프를 재사용하며, topics를 질문 앞에 힌트로 부착.
-#       (필요하면 별도 컬렉션/그래프 분리 가능)
-#     """
-#     rid = str(uuid.uuid4())
-#
-#     if not req.topics:
-#         return {
-#             "question": req.question,
-#             "answer": "제게 물어볼 범주(학칙/학사력/대학생활안내 등) 중 최소 1개를 선택해 주세요.",
-#             "llm_answer": None,
-#             "context": "",
-#             "sources": [],
-#             "micro_mode": "exclude",
-#             "error": "bad_request: no_topics",
-#             "clarification": None,
-#         }
-#
-#     try:
-#         try:
-#             jlog(event="request", route="/info", request_id=rid,
-#                  question=req.question, topics=req.topics)
-#         except Exception:
-#             pass
-#
-#         out = run_rag_graph(
-#             question=f"[{', '.join(req.topics)}] {req.question}",
-#             persist_dir=config.PERSIST_DIR,
-#             collection=config.COLLECTION,            # 필요 시 분리
-#             embedding_model=config.EMBEDDING_MODEL,
-#             topk=req.topk,
-#             model_name=config.LLM_MODEL,
-#             temperature=config.TEMPERATURE,
-#             max_tokens=config.MAX_TOKENS,
-#             use_llm=req.use_llm,
-#             debug=req.debug,
-#             scope_depts=None,
-#             micro_mode=req.micro_mode,
-#             assemble_budget_chars=req.assemble_budget_chars,
-#             max_ctx_chunks=req.max_ctx_chunks,
-#             rerank=req.rerank or False,
-#             rerank_model=req.rerank_model or "cross-encoder/ms-marco-MiniLM-L-6-v2",
-#             rerank_candidates=req.rerank_candidates or 30,
-#         )
-#
-#         try:
-#             jlog(event="result", route="/info", request_id=rid,
-#                  error=out.get("error"), sources=len(out.get("sources") or []))
-#         except Exception:
-#             pass
-#
-#         return {
-#             "question": out.get("question") or req.question,
-#             "answer": out.get("answer"),
-#             "llm_answer": out.get("llm_answer"),
-#             "context": out.get("context"),
-#             "sources": out.get("sources") or [],
-#             "micro_mode": out.get("micro_mode", "exclude"),
-#             "error": out.get("error"),
-#             "clarification": out.get("clarification_prompt"),
-#         }
-#
-#     except Exception as e:
-#         return {
-#             "question": req.question,
-#             "answer": "요청 처리 중 문제가 발생했어요. 잠시 후 다시 시도해 주세요.",
-#             "llm_answer": None,
-#             "context": "",
-#             "sources": [],
-#             "micro_mode": "exclude",
-#             "error": f"server_error: {e}",
-#             "clarification": None,
-#         }
-
-
 # -----------------------------------------------------------------------------
-# 보조 엔드포인트: /announcement (공지)
+# 핵심 엔드포인트: /announcement (공지)
 # -----------------------------------------------------------------------------
 
 from fastapi import APIRouter

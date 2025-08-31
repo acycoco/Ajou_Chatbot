@@ -3,7 +3,6 @@ import pendulum
 import os
 import asyncio
 import json
-import re
 import traceback
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo

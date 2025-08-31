@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 scripts/test_rag.py
 - 하이브리드 리트리벌(BM25 + 벡터) + (옵션) LLM 생성

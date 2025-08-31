@@ -1,4 +1,3 @@
-# app/graphs/state.py
 from typing import TypedDict, List, Dict, Any, Optional, Tuple
 from langchain_core.documents import Document
 

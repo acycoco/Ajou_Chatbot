@@ -1,6 +1,4 @@
-#!/usr/bin/env python3
-# app/scripts/inspect_chunks.py
-import argparse, statistics
+import argparse
 from collections import Counter
 from app.core import config
 from app.services.storage import get_client, get_collection, get_all

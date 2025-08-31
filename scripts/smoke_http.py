@@ -117,10 +117,10 @@ def main():
     print_case("micro_list (fallback)", req, resp, args.verbose)
     record("micro_list (fallback)", req, resp)
 
-    print("\n✅ 모든 스모크 테스트 통과!")
+    print("\n모든 스모크 테스트 통과.")
     if writer:
         writer.close()
-        print(f"💾 저장됨: {save_path}")
+        print(f"저장됨: {save_path}")
 
 if __name__ == "__main__":
     main()
