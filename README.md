@@ -1,6 +1,6 @@
-# 🎓 Ajou University Academic Info & Notice Project RAGGY Backend
+# 🎓 00University Academic Info & Notice Project RAGGY Backend
 
-이 프로젝트는 아주대학교 **학사요람 정보** 및 **학과/단과대 공지사항**을 검색하고 요약해주는 **RAG 기반 FastAPI 백엔드**입니다.  
+이 프로젝트는 00대학교 **학사요람 정보** 및 **학과/단과대 공지사항**을 검색하고 요약해주는 **RAG 기반 FastAPI 백엔드**입니다.  
 LangChain, LangGraph, ChromaDB, LLM API(OpenAI, Anthropic, Google Gemini 등)를 활용하여 자연어 질의에 응답합니다.
 
 ---
